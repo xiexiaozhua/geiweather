@@ -1,0 +1,225 @@
+package dev.wahaha.module.modules.misc;
+
+import dev.wahaha.Client;
+import dev.wahaha.module.Category;
+import dev.wahaha.module.Module;
+import dev.wahaha.module.modules.combat.KillAura;
+import dev.wahaha.utils.DebugUtil;
+import java.io.BufferedReader;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.InputStreamReader;
+import java.net.HttpURLConnection;
+import java.net.URL;
+import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
+import java.util.zip.GZIPInputStream;
+
+import net.minecraft.client.Minecraft;
+import org.json.JSONArray;
+import org.json.JSONException;
+import org.json.JSONObject;
+
+public class GetWeather extends Module {
+
+    private static final String CSDN_API_URL = "https://searchplugin.csdn.net/api/v1/ip/get";
+    private static final String QWEATHER_CITY_LOOKUP_URL = "https://geoapi.qweather.com/v2/city/lookup";
+    private static final String QWEATHER_WEATHER_NOW_URL = "https://devapi.qweather.com/v7/weather/now";
+    private static final String API_KEY = "Yourkey"; // 替换为你的 QWeather API 密钥 网址:https://id.qweather.com/#/login
+    private final static Minecraft mc = Minecraft.getMinecraft();
+    public GetWeather() {
+        super("GetWeather", Category.Misc);
+    }
+
+    public void onEnable() {
+        try {
+            String cityName = 获取当前位置();
+            if (cityName != null) {
+                String locationId = null;
+                try {
+                    locationId = 获取城市信息(cityName, API_KEY);
+                } catch (Exception e) {
+                    DebugUtil.log("获取城市信息时出错: " + e.getMessage());
+                }
+                if (locationId != null) {
+                    DebugUtil.log("城市名称:" + cityName);
+                    获取天气信息(locationId);
+                }
+                Client.instance.moduleManager.getModule(GetWeather.class).setState(false);
+            }
+        } catch (IOException e) {
+            System.err.println("发生错误：" + e.getMessage());
+        }
+    }
+
+    private static String 获取当前位置() throws IOException {
+        String params = "?ip="; // 使用空字符串自动检测 IP 地址
+
+        URL url = new URL(CSDN_API_URL + params);
+        HttpURLConnection connection = (HttpURLConnection) url.openConnection();
+        connection.setRequestMethod("GET");
+        connection.setRequestProperty("Accept", "application/json");
+
+        int responseCode = connection.getResponseCode();
+
+        if (responseCode == 200) {
+            BufferedReader in = new BufferedReader(new InputStreamReader(connection.getInputStream()));
+            String inputLine;
+            StringBuffer response = new StringBuffer();
+
+            while ((inputLine = in.readLine()) != null) {
+                response.append(inputLine);
+            }
+            in.close();
+
+            JSONObject jsonObject = new JSONObject(response.toString());
+            if (jsonObject.has("code") && jsonObject.getInt("code") == 200) {
+                JSONObject data = jsonObject.getJSONObject("data");
+                String address = data.getString("address");
+                String ip = data.getString("ip");
+
+                // 提取城市名称
+                String[] addressParts = address.split(" ");
+                if (addressParts.length >= 3) {
+                    String cityName = addressParts[2];
+                    return cityName;
+                } else {
+                    System.out.println("无法从地址中提取城市名称");
+                    return null;
+                }
+            } else {
+                System.out.println("CSDN API 返回错误: " + jsonObject.optString("msg", "未知错误"));
+                return null;
+            }
+        } else {
+            System.out.println("请求失败，状态码: " + responseCode);
+            return null;
+        }
+    }
+
+    private static String 获取城市信息(String cityName, String apiKey) throws Exception {
+        String params = "?location=" + URLEncoder.encode(cityName, StandardCharsets.UTF_8) +
+                "&key=" + apiKey + "&number=1" + "&gzip=n";
+
+        URL url = new URL(QWEATHER_CITY_LOOKUP_URL + params);
+        HttpURLConnection connection = (HttpURLConnection) url.openConnection();
+        connection.setRequestMethod("GET");
+        connection.setRequestProperty("Accept", "application/json");
+
+        try (
+                BufferedReader in = new BufferedReader(
+                        new InputStreamReader(connection.getInputStream(), StandardCharsets.UTF_8)
+                )
+        ) {
+            int responseCode = connection.getResponseCode();
+
+            if (responseCode == 200) {
+                String inputLine;
+                StringBuffer response = new StringBuffer();
+
+                while ((inputLine = in.readLine()) != null) {
+                    response.append(inputLine);
+                }
+
+                JSONObject jsonObject = new JSONObject(response.toString());
+                if ("200".equals(jsonObject.optString("code", ""))) {
+                    JSONArray locations = jsonObject.getJSONArray("location");
+                    if (locations.length() > 0) {
+                        JSONObject location = locations.getJSONObject(0);
+                        String locationId = location.getString("id"); // 提取 id 并赋值给 locationId
+                        return locationId;
+                    } else {
+                        System.out.println("未找到城市 " + cityName);
+                    }
+                } else {
+                    System.out.println("QWeather City Lookup API 返回错误: " + jsonObject.optString("code", "未知错误") + ", " + jsonObject.optString("message", "未知错误"));
+                }
+            } else {
+                System.out.println("请求失败，状态码: " + responseCode);
+                System.out.println("请求URL: " + QWEATHER_CITY_LOOKUP_URL + params);
+            }
+        } catch (IOException e) {
+            System.err.println("发生IO异常：" + e.getMessage());
+        }
+        return null;
+    }
+
+    public static void 获取天气信息(String locationId) {
+        String params = "?location=" + locationId + "&key=" + API_KEY + "&gzip=n";
+        String qUrl = QWEATHER_WEATHER_NOW_URL + params;
+
+        String response = doGet(qUrl);
+
+        try {
+            JSONObject jsonObject = new JSONObject(response);
+            if (jsonObject.has("code") && jsonObject.getString("code").equals("200")) {
+                JSONObject now = jsonObject.getJSONObject("now");
+                DebugUtil.log("天气状况: " + now.getString("text"));
+                DebugUtil.log("温度: " + now.getString("temp") + "°C");
+                DebugUtil.log("湿度: " + now.getString("humidity") + "%");
+                DebugUtil.log("风速: " + now.getString("windSpeed") + " 公里/小时");
+                DebugUtil.log("风向: " + now.getString("windDir"));
+            } else {
+                System.out.println("QWeather Weather Now API 返回错误: " + jsonObject.optString("code", "未知错误") + ", " + jsonObject.optString("message", "未知错误"));
+            }
+        } catch (JSONException e) {
+            System.out.println("解析JSON时出错: " + e.getMessage());
+        }
+    }
+
+    private static String doGet(String qUrl) {
+        StringBuilder sb = new StringBuilder();
+        InputStream is = null;
+        BufferedReader br = null;
+
+        try {
+            URL url = new URL(qUrl);
+            HttpURLConnection conn = (HttpURLConnection) url.openConnection();
+
+            conn.setRequestMethod("GET");
+            conn.setReadTimeout(1000);
+            conn.setConnectTimeout(1000);
+            conn.setRequestProperty("accept", "*/*");
+            conn.setRequestProperty("contentType", "application/json;charset=utf-8");
+            // 明确指定不接受gzip压缩的数据
+            conn.setRequestProperty("Accept-Encoding", "identity");
+
+            int responseCode = conn.getResponseCode();
+            System.out.println("请求QWeather Weather Now API状态码: " + responseCode);
+
+            if (responseCode == 200) {
+                // 检查响应头是否包含Content-Encoding: gzip
+                String contentEncoding = conn.getContentEncoding();
+                if ("gzip".equalsIgnoreCase(contentEncoding)) {
+                    is = new GZIPInputStream(conn.getInputStream());
+                } else {
+                    is = conn.getInputStream();
+                }
+
+                br = new BufferedReader(new InputStreamReader(is, StandardCharsets.UTF_8));
+
+                String line;
+                while ((line = br.readLine()) != null) {
+                    sb.append(line);
+                }
+            } else {
+                System.out.println("请求失败，状态码: " + responseCode);
+            }
+
+        } catch (IOException e) {
+            e.printStackTrace();
+        } finally {
+            try {
+                if (br != null) {
+                    br.close();
+                }
+                if (is != null) {
+                    is.close();
+                }
+            } catch (IOException e) {
+                e.printStackTrace();
+            }
+        }
+        return sb.toString();
+    }
+}
