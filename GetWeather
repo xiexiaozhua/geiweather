@@ -22,7 +22,7 @@ import org.json.JSONObject;
 
 public class GetWeather extends Module {
 
-    private static final String CSDN_API_URL = "https://searchplugin.csdn.net/api/v1/ip/get";
+    private static final String CSDN_API_URL = "https://www.ip.cn/api/index?ip&type=0";
     private static final String QWEATHER_CITY_LOOKUP_URL = "https://geoapi.qweather.com/v2/city/lookup";
     private static final String QWEATHER_WEATHER_NOW_URL = "https://devapi.qweather.com/v7/weather/now";
     private static final String API_KEY = "Yourkey"; // 替换为你的 QWeather API 密钥 网址:https://id.qweather.com/#/login
